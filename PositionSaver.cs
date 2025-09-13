@@ -1,4 +1,6 @@
+using System;
 using System.Collections.Generic;
+using System.Threading.Tasks;
 using JetBrains.Annotations;
 using SFS.IO;
 using SFS.Parsers.Json;
@@ -13,14 +15,39 @@ namespace UITools
     [UsedImplicitly(ImplicitUseTargetFlags.WithMembers)]
     public static class PositionSaver
     {
-        static Dictionary<string, Vector2> windows;
-        static FilePath saveFile;
+        private const int AUTOSAVE_SECONDS = 60;
+        
+        private static Dictionary<string, Vector2> windows = new(); // Apparently the indexes of this were failing to compile without the field being pre-initialized?
+        private static FilePath saveFile;
+        
+        private static bool hasUnsavedChanges;
+        private static bool quitting;
+        
+        static async void AutosaveLoop() { // probably a coroutine or InvokeRepeating would have been better here, but this ain't no monobehaviour
+            while (!quitting)
+            {
+                await Task.Delay(AUTOSAVE_SECONDS * 1000);
 
+                if (hasUnsavedChanges)
+                    Save();
+                hasUnsavedChanges = false;
+            }
+        }
+        
         internal static void Initialize()
         {
             saveFile = new FolderPath(Main.main.ModFolder).ExtendToFile("positions.txt");
+
+            AutosaveLoop();
+            
             Load();
             Save();
+            
+            Application.quitting += () =>
+            {
+                quitting = true;
+                Save();
+            };
         }
 
         /// <summary>
@@ -39,8 +66,8 @@ namespace UITools
         /// </example>
         public static void RegisterPermanentSaving(this Window window, string uniqueName)
         {
-            if (windows.ContainsKey(uniqueName))
-                window.Position = windows[uniqueName];
+            if (windows.TryGetValue(uniqueName, out var savedPosition))
+                window.Position = savedPosition;
             else
                 windows.Add(uniqueName, window.Position);
             window.RegisterOnDropListener(() => OnPositionChange(uniqueName, window.Position));
@@ -49,15 +76,13 @@ namespace UITools
         static void OnPositionChange(string name, Vector2 position)
         {
             windows[name] = position;
-            Save();
+            hasUnsavedChanges = true;
         }
 
         static void Load()
         {
-            windows = !saveFile.FileExists()
-                ? new Dictionary<string, Vector2>()
-                : JsonWrapper.FromJson<Dictionary<string, Vector2>>(saveFile.ReadText());
-            windows ??= new Dictionary<string, Vector2>();
+            if (saveFile.FileExists())
+                windows = JsonWrapper.FromJson<Dictionary<string, Vector2>>(saveFile.ReadText()) ?? windows; // Assign `windows` to itself if json deserialization failed
         }
 
         static void Save()
