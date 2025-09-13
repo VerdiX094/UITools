@@ -37,7 +37,7 @@ namespace UITools
         public override string MinimumGameVersionNecessary => "1.5.10.2";
 
         /// <summary>ModVersion</summary>
-        public override string ModVersion => "1.1.6";
+        public override string ModVersion => "1.2";
 
         /// <summary>Description</summary>
         public override string Description =>
