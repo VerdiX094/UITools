@@ -68,7 +68,8 @@ namespace UITools
         /// </summary>
         public override void Load()
         {
-            ModsUpdater.StartUpdate();
+            if (!new FolderPath(ModFolder).ExtendToFile("NO_MOD_UPDATE").FileExists())
+                ModsUpdater.StartUpdate();
         }
 
         private void PatchAll()
