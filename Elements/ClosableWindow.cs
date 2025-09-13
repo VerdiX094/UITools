@@ -66,7 +66,8 @@ namespace UITools
             minimizeButton = Builder.CreateButton(rectTransform, 25, 25, (int)-(openedSize.Value.x / 2 - 15), -25,
                 text: "▼", onClick: () => Minimized ^= true);
             minimizeButtonText = minimizeButton.rectTransform.Find("Text");
-
+            minimizeButtonText.localEulerAngles = new Vector3(0, 0, minimized ? 0 : 90);
+            
             openedSize.OnChange += OnSizeChanged;
             minimized.OnChange += OnMinimizedChanged;
         }
