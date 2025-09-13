@@ -17,8 +17,11 @@ namespace UITools
     {
         private const int AUTOSAVE_SECONDS = 60;
         
-        private static Dictionary<string, Vector2> windows = new(); // Apparently the indexes of this were failing to compile without the field being pre-initialized?
-        private static FilePath saveFile;
+        private static Dictionary<string, Vector2> positions = new(); // Apparently the indexes of this were failing to compile without the field being pre-initialized?
+        private static Dictionary<string, bool> minimizedStates = new();
+        
+        private static FilePath positionsFile;
+        private static FilePath minimizedStatesFile;
         
         private static bool hasUnsavedChanges;
         private static bool quitting;
@@ -36,7 +39,8 @@ namespace UITools
         
         internal static void Initialize()
         {
-            saveFile = new FolderPath(Main.main.ModFolder).ExtendToFile("positions.txt");
+            positionsFile = new FolderPath(Main.main.ModFolder).ExtendToFile("positions.txt");
+            minimizedStatesFile = new FolderPath(Main.main.ModFolder).ExtendToFile("minimizedStates.txt");
 
             AutosaveLoop();
             
@@ -66,28 +70,73 @@ namespace UITools
         /// </example>
         public static void RegisterPermanentSaving(this Window window, string uniqueName)
         {
-            if (windows.TryGetValue(uniqueName, out var savedPosition))
+            if (window is ClosableWindow closable) // Backwards compatibility with old mods
+            {
+                RegisterPermanentSaving(closable, uniqueName);
+                return;
+            }
+            
+            if (positions.TryGetValue(uniqueName, out var savedPosition))
                 window.Position = savedPosition;
             else
-                windows.Add(uniqueName, window.Position);
+                positions.Add(uniqueName, window.Position);
             window.RegisterOnDropListener(() => OnPositionChange(uniqueName, window.Position));
+        }
+        
+        /// <summary>
+        ///     Allow you to register you window for saving that will save position and closed state even through game relaunch.
+        ///     You should call it every time you rebuild the window.
+        ///     Default saving function should be disabled!
+        /// </summary>
+        /// <param name="window">Window that will be saved</param>
+        /// <param name="uniqueName">Unique name id which uses to find your window position</param>
+        /// <example>
+        ///     The following code register window for permanent position saving
+        ///     <code>
+        /// ClosableWindow window = UIToolsBuilder.CreateClosableWindow(..., savePosition: false);
+        /// window.RegisterPermanentSaving("UITools.myAwesomeWindow");
+        /// </code>
+        /// </example>
+        public static void RegisterPermanentSaving(this ClosableWindow window, string uniqueName)
+        {
+            if (positions.TryGetValue(uniqueName, out var savedPosition))
+                window.Position = savedPosition;
+            else
+                positions.Add(uniqueName, window.Position);
+            
+            if (minimizedStates.TryGetValue(uniqueName, out var openState))
+                window.Minimized = openState;
+            else
+                minimizedStates.Add(uniqueName, window.Minimized);
+            
+            window.RegisterOnDropListener(() => OnPositionChange(uniqueName, window.Position));
+            window.OnMinimizedChangedEvent += () => OnMinimizedChange(uniqueName, window.Minimized);
         }
 
         static void OnPositionChange(string name, Vector2 position)
         {
-            windows[name] = position;
+            positions[name] = position;
+            hasUnsavedChanges = true;
+        }
+
+        static void OnMinimizedChange(string name, bool newMinimizedState)
+        {
+            minimizedStates[name] = newMinimizedState;
             hasUnsavedChanges = true;
         }
 
         static void Load()
         {
-            if (saveFile.FileExists())
-                windows = JsonWrapper.FromJson<Dictionary<string, Vector2>>(saveFile.ReadText()) ?? windows; // Assign `windows` to itself if json deserialization failed
+            if (positionsFile.FileExists())
+                positions = JsonWrapper.FromJson<Dictionary<string, Vector2>>(positionsFile.ReadText()) ?? positions; // Assign `positions` to itself if json deserialization failed
+            if (minimizedStatesFile.FileExists())
+                minimizedStates = JsonWrapper.FromJson<Dictionary<string, bool>>(minimizedStatesFile.ReadText()) ?? minimizedStates; // Same for `minimizedStates`
         }
 
         static void Save()
         {
-            saveFile.WriteText(JsonWrapper.ToJson(windows, true));
+            positionsFile.WriteText(JsonWrapper.ToJson(positions, true));
+            minimizedStatesFile.WriteText(JsonWrapper.ToJson(minimizedStates, true));
         }
     }
 }
