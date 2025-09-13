@@ -104,6 +104,13 @@ namespace UITools
         /// <param name="screenAnchor">The edge/corner of the screen that the position should be relative to.</param>
         /// <param name="windowOrigin">The edge/corner of the window that should have this position.</param>
         /// <returns>The upper-center relative position that can be used with Builder.CreateWindow or UIToolsBuilder.CreateClosableWindow.</returns>
+        /// <example>
+        /// A simple demo, creating a 360x240 window, aligned to the top-left corner of the screen, with 16 pixels of margin on both axis.
+        ///  <code>
+        ///   Vector2Int coords = UIUtility.AnchorOriginToModGUI(16, -16, 360, 240, AnchorOrigin.TopLeft, AnchorOrigin.TopLeft)
+        ///   Window window = Builder.CreateWindow(..., ..., 360, 240, coords.x, coords.y, ...);
+        ///  </code>
+        /// </example>
         public static Vector2Int AnchorOriginToModGUI(int posX, int posY, int width, int height, AnchorOrigin screenAnchor = AnchorOrigin.MiddleCenter, AnchorOrigin windowOrigin = AnchorOrigin.TopCenter)
         {
             Vector2Int result = new(posX, posY);
