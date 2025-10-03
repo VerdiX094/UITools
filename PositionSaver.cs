@@ -26,14 +26,16 @@ namespace UITools
         private static bool hasUnsavedChanges;
         private static bool quitting;
         
-        static async void AutosaveLoop() { // probably a coroutine or InvokeRepeating would have been better here, but this ain't no monobehaviour
+        static async Task AutosaveLoop() { // probably a coroutine or InvokeRepeating would have been better here, but this ain't no monobehaviour
             while (!quitting)
             {
                 await Task.Delay(AUTOSAVE_SECONDS * 1000);
 
                 if (hasUnsavedChanges)
+                {
                     Save();
-                hasUnsavedChanges = false;
+                    hasUnsavedChanges = false;
+                }
             }
         }
         
@@ -42,7 +44,7 @@ namespace UITools
             positionsFile = new FolderPath(Main.main.ModFolder).ExtendToFile("positions.txt");
             minimizedStatesFile = new FolderPath(Main.main.ModFolder).ExtendToFile("minimizedStates.txt");
 
-            AutosaveLoop();
+            Task.Run(AutosaveLoop);
             
             Load();
             Save();
