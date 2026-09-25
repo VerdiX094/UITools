@@ -9,6 +9,7 @@ using Cysharp.Threading.Tasks;
 using ModLoader;
 using SFS.Input;
 using SFS.IO;
+using SFS.Parsers.Json;
 using SFS.UI;
 using UnityEngine;
 
@@ -22,6 +23,19 @@ namespace UITools
         // Tracks how many files were successfully updated
         static int loadedFiles;
 
+        // Remote hashes are looked up online once per lifetime and reused from cache in between
+        static readonly TimeSpan HashCacheLifetime = TimeSpan.FromHours(24);
+        static readonly TimeSpan MeteredHashCacheLifetime = TimeSpan.FromDays(3);
+
+        // Stored for a lookup that failed on a metered connection
+        const string FailedLookup = "";
+
+        // Remote hash by URL
+        static Dictionary<string, string> hashes = new();
+        static readonly IFolder modFolder = Main.main.GetModFolder();
+        static readonly IFile hashCacheFile = modFolder.GetFile("hashes.txt");
+        static readonly IFile hashUpdateFile = modFolder.GetFile("hashUpdate.txt");
+        
         // Entry point for running the update process detached from scene context
         public static void StartUpdate()
         {
@@ -88,92 +102,186 @@ namespace UITools
         }
 
         // Returns a dictionary of mods -> files that need updating
-        static async UniTask<Dictionary<Mod, List<(string url, FilePath path)>>> GetFilesNeedingUpdate()
+        static async UniTask<Dictionary<Mod, List<(string url, IFile file)>>> GetFilesNeedingUpdate()
         {
-            var result = new Dictionary<Mod, List<(string, FilePath)>>();
-            using var md5 = MD5.Create();
+            var metered = await ConnectionCost.IsMetered();
 
-            foreach (IUpdatable updatable in Loader.main.GetAllMods().OfType<IUpdatable>())
+            // A fresh cache leaves only files it does not cover to look up online
+            var refreshAll = !TryLoadHashCache(metered ? MeteredHashCacheLifetime : HashCacheLifetime);
+            var fetchedAny = false;
+
+            var result = new Dictionary<Mod, List<(string, IFile)>>();
+
+            foreach ((Mod mod, Dictionary<string, IFile> files) in GetUpdatableMods())
             {
-                if (updatable is not Mod mod) continue;
-
-                foreach (var kvp in updatable.UpdatableFiles)
+                foreach (var kvp in files)
                 {
                     var url = kvp.Key;
-                    FilePath path = kvp.Value;
+                    IFile file = kvp.Value;
+
+                    // A lookup that failed earlier is retried, unless the connection is metered
+                    if (refreshAll || !hashes.TryGetValue(url, out var remote) ||
+                        (string.IsNullOrEmpty(remote) && !metered))
+                    {
+                        remote = await FetchRemoteHash(url);
+                        fetchedAny = true;
+
+                        if (remote != null)
+                            hashes[url] = remote;
+                        else if (metered)
+                            hashes[url] = FailedLookup; // Remembered, so the file is left alone on the next start
+                        else
+                            hashes.Remove(url);
+                    }
+
+                    // Nothing to compare against; the failure was logged when it happened
+                    if (string.IsNullOrEmpty(remote)) continue;
 
                     try
                     {
-                        // Check remote MD5 hash
-                        var hashUrl =
-                            $"https://files.cucumber-space.online/api/hashes/md5?file={Uri.EscapeDataString(url)}";
-                        HttpResponseMessage resp = await Http.GetAsync(hashUrl);
-                        if (!resp.IsSuccessStatusCode) throw new Exception("Hash request failed");
-                
-                        var local = path.FileExists() ? md5.ComputeHash(path.ReadBytes()) : Array.Empty<byte>();
-                        var remoteHashBase64 = await resp.Content.ReadAsStringAsync();
-                        var remote = Convert.FromBase64String(remoteHashBase64);
-                        
+                        var local = file.Exists() ? GetLocalSHA256(file) : "";
+
                         // If hash mismatch, mark for update
-                        if (!local.SequenceEqual(remote))
+                        if (!string.Equals(local, remote, StringComparison.OrdinalIgnoreCase))
                         {
                             if (!result.ContainsKey(mod))
-                                result[mod] = new List<(string, FilePath)>();
-                            result[mod].Add((url, path));
+                                result[mod] = new List<(string, IFile)>();
+                            result[mod].Add((url, file));
                         }
-                    }
-                    catch (HttpRequestException ex)
-                    {
-                        var message = $"[ModUpdater] Network error while checking hash for {url}: {ex.Message}";
-                        if (ex.InnerException != null)
-                            message += "\nInner: " + ex.InnerException.GetType().Name + " - " + ex.InnerException.Message;
-                        Debug.Log(message);
-                    }
-                    catch (FormatException ex)
-                    {
-                        Debug.Log($"[ModUpdater] Invalid base64 hash from server for {url}: {ex.Message}");
                     }
                     catch (Exception ex)
                     {
-                        Debug.Log($"[ModUpdater] Unexpected error while checking hash for {url}: {ex.Message}");
+                        Debug.Log($"[ModUpdater] Could not hash {file.Path} for {url}: {ex.Message}");
                     }
                 }
             }
 
+            if (fetchedAny)
+                SaveHashCache(refreshAll);
+
             return result;
         }
 
+        // The storage API interface wins when a mod implements both
+        static IEnumerable<(Mod mod, Dictionary<string, IFile> files)> GetUpdatableMods()
+        {
+            foreach (Mod mod in Loader.main.GetAllMods())
+            {
+                if (mod is IUpdatableMod updatable)
+                {
+                    yield return (mod, updatable.UpdatableFiles);
+                    continue;
+                }
+
+#pragma warning disable 618
+                if (mod is IUpdatable legacy)
+                    yield return (mod, legacy.UpdatableFiles.ToDictionary(
+                        entry => entry.Key, entry => entry.Value.ToStorageFile()));
+#pragma warning restore 618
+            }
+        }
+
+        // Returns null after logging when the lookup fails
+        static async UniTask<string> FetchRemoteHash(string url)
+        {
+            try
+            {
+                return await HashUtility.GetSHA256(url);
+            }
+            catch (HttpRequestException ex)
+            {
+                var message = $"[ModUpdater] Network error while checking hash for {url}: {ex.Message}";
+                if (ex.InnerException != null)
+                    message += "\nInner: " + ex.InnerException.GetType().Name + " - " + ex.InnerException.Message;
+                Debug.Log(message);
+            }
+            catch (Exception ex)
+            {
+                Debug.Log($"[ModUpdater] Unexpected error while checking hash for {url}: {ex.Message}");
+            }
+
+            return null;
+        }
+        
+        static bool TryLoadHashCache(TimeSpan lifetime)
+        {
+            hashes = new Dictionary<string, string>();
+            try
+            {
+                if (!hashCacheFile.Exists() || !hashUpdateFile.Exists()) return false;
+                if (!long.TryParse(hashUpdateFile.ReadText(), out var ticks)) return false;
+
+                // A negative age means the clock was set back
+                TimeSpan age = DateTime.UtcNow - new DateTime(ticks, DateTimeKind.Utc);
+                if (age < TimeSpan.Zero || age >= lifetime) return false;
+
+                var cached = JsonWrapper.FromJson<Dictionary<string, string>>(hashCacheFile.ReadText());
+                if (cached == null) return false;
+
+                hashes = cached;
+                return true;
+            }
+            catch (Exception ex)
+            {
+                Debug.Log($"[ModUpdater] Could not read hash cache: {ex.Message}");
+                return false;
+            }
+        }
+
+        // Only a full refresh records the timestamp
+        static void SaveHashCache(bool fullRefresh)
+        {
+            try
+            {
+                hashCacheFile.WriteText(JsonWrapper.ToJson(hashes, false));
+                if (fullRefresh)
+                    hashUpdateFile.WriteText(DateTime.UtcNow.Ticks.ToString());
+            }
+            catch (Exception ex)
+            {
+                Debug.Log($"[ModUpdater] Could not write hash cache: {ex.Message}");
+            }
+        }
+
+        // Same lowercase hex format as HashUtility.GetSHA256
+        static string GetLocalSHA256(IFile file)
+        {
+            using var sha256 = SHA256.Create();
+            return HashUtility.GetHexDigest(sha256.ComputeHash(file.ReadBytes()));
+        }
+
         // Attempts to update all files for a single mod atomically
-        static async UniTask<bool> TryUpdateMod(Mod mod, List<(string url, FilePath path)> files,
+        static async UniTask<bool> TryUpdateMod(Mod mod, List<(string url, IFile file)> files,
             Dictionary<Mod, List<string>> failedMods)
         {
+            // Staged in the OS temp directory, which is not mod storage
             var tempDir = Path.Combine(Path.GetTempPath(), "ModUpdates", Guid.NewGuid().ToString());
-            Directory.CreateDirectory(tempDir);
+            IFolder tempFolder = new DefaultFolder(tempDir).Create();
 
             var semaphore = new SemaphoreSlim(3);
-            var downloads = new List<(FilePath original, string tempPath)>();
+            var downloads = new List<(string url, IFile original, IFile staged)>();
             var failedFiles = new List<string>();
 
             await UniTask.WhenAll(files.Select(async file =>
             {
                 var url = file.url;
-                FilePath originalPath = file.path;
-                var tempPath = Path.Combine(tempDir, Path.GetFileName(originalPath));
+                IFile originalFile = file.file;
+                var fileName = originalFile.Name;
+                IFile stagedFile = tempFolder.GetFile(fileName);
 
                 await semaphore.WaitAsync();
                 try
                 {
-                    var success = await Download(url, tempPath);
+                    var success = await Download(url, stagedFile);
                     if (success)
                     {
                         lock (downloads)
                         {
-                            downloads.Add((originalPath, tempPath));
+                            downloads.Add((url, originalFile, stagedFile));
                         }
                     }
                     else
                     {
-                        var fileName = Path.GetFileName(originalPath);
                         lock (failedFiles)
                         {
                             failedFiles.Add(fileName);
@@ -191,8 +299,13 @@ namespace UITools
             // If all downloads succeed, commit updates
             if (failedFiles.Count == 0)
             {
-                foreach ((FilePath original, string tempPath) download in downloads)
-                    File.Copy(download.tempPath, download.original, true);
+                foreach (var download in downloads)
+                {
+                    download.staged.Copy(download.original);
+                    // Otherwise a remote file that changed since the fetch is offered again every start
+                    hashes[download.url] = GetLocalSHA256(download.original);
+                }
+                SaveHashCache(false);
 
                 loadedFiles += downloads.Count;
 
@@ -206,16 +319,15 @@ namespace UITools
             failedMods[mod] = failedFiles;
 
             // Clean up downloaded files if not committed
-            foreach ((FilePath original, string tempPath) download in downloads.Where(download =>
-                         File.Exists(download.tempPath)))
-                File.Delete(download.tempPath);
+            foreach (var download in downloads.Where(download => download.staged.Exists()))
+                download.staged.Delete();
             if (Directory.Exists(tempDir)) Directory.Delete(tempDir, true);
 
             return false;
         }
 
         // Download a file and write to disk
-        static async UniTask<bool> Download(string url, string path)
+        static async UniTask<bool> Download(string url, IFile file)
         {
             try
             {
@@ -225,7 +337,7 @@ namespace UITools
                 var data = await resp.Content.ReadAsByteArrayAsync();
                 if (data == null || data.Length == 0) return false;
 
-                File.WriteAllBytes(path, data);
+                file.WriteBytes(data);
                 return true;
             }
             catch (Exception ex)
@@ -237,7 +349,7 @@ namespace UITools
 
         // Confirmation prompt before updates begin
         static async UniTask<bool> ConfirmUpdatePrompt(
-            Dictionary<Mod, List<(string url, FilePath path)>> updates)
+            Dictionary<Mod, List<(string url, IFile file)>> updates)
         {
             var list = string.Join("\n", updates
                 .OrderBy(kvp => kvp.Key.DisplayName)
@@ -277,6 +389,7 @@ namespace UITools
     ///     Implement this interface on main mod class if you want it to be updated at game start
     /// </summary>
     // ReSharper disable once MemberCanBePrivate.Global
+    [Obsolete("Implement IUpdatableMod instead, which uses the IFile storage API.")]
     public interface IUpdatable
     {
         /// <summary>
@@ -285,5 +398,18 @@ namespace UITools
         /// </summary>
         /// <returns></returns>
         public Dictionary<string, FilePath> UpdatableFiles { get; }
+    }
+
+    /// <summary>
+    ///     Implement this interface on main mod class if you want it to be updated at game start
+    /// </summary>
+    public interface IUpdatableMod
+    {
+        /// <summary>
+        ///     Returns dictionary of files that should be updated
+        ///     string is web link, IFile is the file the download is written to
+        /// </summary>
+        /// <returns></returns>
+        public Dictionary<string, IFile> UpdatableFiles { get; }
     }
 }

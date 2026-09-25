@@ -1,8 +1,9 @@
 ﻿using System.Collections.Generic;
+using Cysharp.Threading.Tasks;
 using HarmonyLib;
 using JetBrains.Annotations;
 using ModLoader;
-using SFS.IO;
+using UnityEngine;
 
 namespace UITools
 {
@@ -11,7 +12,7 @@ namespace UITools
     /// </summary>
 // ReSharper disable once ClassNeverInstantiated.Global
     [UsedImplicitly(ImplicitUseTargetFlags.WithMembers)]
-    public class Main : Mod, IUpdatable
+    public class Main : Mod, IUpdatableMod
     {
         internal static Main main;
 
@@ -47,11 +48,11 @@ namespace UITools
         public override string IconLink => "https://i.imgur.com/r7rCmJT.jpg";
 
         /// <inheritdoc />
-        public Dictionary<string, FilePath> UpdatableFiles => new()
+        public Dictionary<string, IFile> UpdatableFiles => new()
         {
             {
-                "https://github.com/cucumber-sp/UITools/releases/latest/download/UITools.dll",
-                new FolderPath(ModFolder).ExtendToFile("UITools.dll")
+                "https://github.com/VerdiX094/UITools/releases/latest/download/UITools.dll",
+                this.GetModFolder().GetFile("UITools.dll")
             }
         };
 
@@ -68,8 +69,16 @@ namespace UITools
         /// </summary>
         public override void Load()
         {
-            if (!new FolderPath(ModFolder).ExtendToFile("NO_MOD_UPDATE").FileExists())
+            LogTestHash().Forget();
+
+            if (!this.GetModFolder().GetFile("NO_MOD_UPDATE").Exists())
                 ModsUpdater.StartUpdate();
+        }
+
+        private static async UniTask LogTestHash()
+        {
+            Debug.Log(await HashUtility.GetSHA256(
+                "https://github.com/VerdiX094/sfs-electricity/releases/download/v1.0.1/Electricity_v1.0.1.pack"));
         }
 
         private void PatchAll()

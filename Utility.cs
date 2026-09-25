@@ -119,7 +119,7 @@ namespace UITools
             
             if (((int)windowOrigin & 0x20) != 0) // Center origin, add half window height
                 result.y += height / 2;
-            if (((int)windowOrigin & 0x40) != 0) // Bottom origin, add full window height
+            if (((int)windowOrigin & 0x40) != 0) // Bottom originmsbuild UITools.csproj /t:ResolveAssemblyReferences , add full window height
                 result.y += height;
             if (((int)windowOrigin & 0x01) != 0) // Left origin, add half window width (so top-center goes to the right)
                 result.x += width / 2;

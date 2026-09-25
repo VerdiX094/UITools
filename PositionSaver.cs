@@ -2,7 +2,6 @@ using System;
 using System.Collections.Generic;
 using System.Threading.Tasks;
 using JetBrains.Annotations;
-using SFS.IO;
 using SFS.Parsers.Json;
 using SFS.UI.ModGUI;
 using UnityEngine;
@@ -20,13 +19,13 @@ namespace UITools
         private static Dictionary<string, Vector2> positions = new(); // Apparently the indexes of this were failing to compile without the field being pre-initialized?
         private static Dictionary<string, bool> minimizedStates = new();
         
-        private static FilePath positionsFile;
-        private static FilePath minimizedStatesFile;
+        private static IFile positionsFile;
+        private static IFile minimizedStatesFile;
         
         private static bool hasUnsavedChanges;
         private static bool quitting;
         
-        static async Task AutosaveLoop() { // probably a coroutine or InvokeRepeating would have been better here, but this ain't no monobehaviour
+        static async Task AutosaveLoop() {
             while (!quitting)
             {
                 await Task.Delay(AUTOSAVE_SECONDS * 1000);
@@ -41,8 +40,9 @@ namespace UITools
         
         internal static void Initialize()
         {
-            positionsFile = new FolderPath(Main.main.ModFolder).ExtendToFile("positions.txt");
-            minimizedStatesFile = new FolderPath(Main.main.ModFolder).ExtendToFile("minimizedStates.txt");
+            IFolder modFolder = Main.main.GetModFolder();
+            positionsFile = modFolder.GetFile("positions.txt");
+            minimizedStatesFile = modFolder.GetFile("minimizedStates.txt");
 
             Task.Run(AutosaveLoop);
             
@@ -129,9 +129,9 @@ namespace UITools
 
         static void Load()
         {
-            if (positionsFile.FileExists())
+            if (positionsFile.Exists())
                 positions = JsonWrapper.FromJson<Dictionary<string, Vector2>>(positionsFile.ReadText()) ?? positions; // Assign `positions` to itself if json deserialization failed
-            if (minimizedStatesFile.FileExists())
+            if (minimizedStatesFile.Exists())
                 minimizedStates = JsonWrapper.FromJson<Dictionary<string, bool>>(minimizedStatesFile.ReadText()) ?? minimizedStates; // Same for `minimizedStates`
         }
 
@@ -141,4 +141,4 @@ namespace UITools
             minimizedStatesFile.WriteText(JsonWrapper.ToJson(minimizedStates, true));
         }
     }
-}
+}

@@ -41,6 +41,9 @@
         <Reference Include="Assembly-CSharp">
             <HintPath>References\Assembly-CSharp.dll</HintPath>
         </Reference>
+        <Reference Include="Assembly-CSharp-firstpass">
+          <HintPath>References\Assembly-CSharp-firstpass.dll</HintPath>
+        </Reference>
         <Reference Include="System">
             <HintPath>References\System.dll</HintPath>
         </Reference>
@@ -60,6 +63,9 @@
         <Reference Include="UnityEngine.ImageConversionModule">
             <HintPath>References\UnityEngine.ImageConversionModule.dll</HintPath>
         </Reference>
+        <Reference Include="UnityEngine.JSONSerializeModule">
+            <HintPath>References\UnityEngine.JSONSerializeModule.dll</HintPath>
+        </Reference>
         <Reference Include="UnityEngine.TextRenderingModule">
             <HintPath>References\UnityEngine.TextRenderingModule.dll</HintPath>
         </Reference>
@@ -69,13 +75,16 @@
     </ItemGroup>
     <ItemGroup>
         <Compile Include="ConfigurationMenu.cs"/>
+        <Compile Include="ConnectionCost.cs"/>
         <Compile Include="Elements\ClosableWindow.cs"/>
         <Compile Include="Elements\NumberInput.cs"/>
         <Compile Include="Elements\RadioButtons.cs"/>
         <Compile Include="Elements\UIToolsBuilder.cs"/>
+        <Compile Include="HashUtility.cs" />
         <Compile Include="ModSettings.cs"/>
         <Compile Include="ModsUpdater.cs"/>
         <Compile Include="PositionSaver.cs"/>
+        <Compile Include="StorageUtility.cs"/>
         <Compile Include="UIExtensions.cs"/>
         <Compile Include="Main.cs"/>
         <Compile Include="Patches.cs"/>

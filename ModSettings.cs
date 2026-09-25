@@ -20,17 +20,39 @@ namespace UITools
         /// <summary>
         ///     Getting settings file path
         /// </summary>
-        protected abstract FilePath SettingsFile { get; }
+        [Obsolete("Override " + nameof(ConfigFile) + " instead, which uses the IFile storage API.")]
+        protected virtual FilePath SettingsFile => null;
+
+        /// <summary>
+        ///     The file your settings are stored in
+        /// </summary>
+        protected virtual IFile ConfigFile => null;
+
+        // Falls back to the deprecated property so existing overrides keep working
+#pragma warning disable 618
+        IFile GetConfigFile()
+        {
+            IFile file = ConfigFile ?? SettingsFile.ToStorageFile();
+
+            if (file == null)
+                throw new InvalidOperationException(
+                    $"{GetType().Name} overrides neither {nameof(ConfigFile)} nor {nameof(SettingsFile)}, " +
+                    "so there is nowhere to store its settings.");
+
+            return file;
+        }
+#pragma warning restore 618
 
         void Load()
         {
-            settings = SettingsFile.FileExists() ? JsonWrapper.FromJson<T>(SettingsFile.ReadText()) : new T();
+            IFile file = GetConfigFile();
+            settings = file.Exists() ? JsonWrapper.FromJson<T>(file.ReadText()) : new T();
             settings ??= new T();
         }
 
         void Save()
         {
-            SettingsFile.WriteText(JsonWrapper.ToJson(settings, true));
+            GetConfigFile().WriteText(JsonWrapper.ToJson(settings, true));
         }
 
 
