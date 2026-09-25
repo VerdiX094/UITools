@@ -69,16 +69,8 @@ namespace UITools
         /// </summary>
         public override void Load()
         {
-            LogTestHash().Forget();
-
             if (!this.GetModFolder().GetFile("NO_MOD_UPDATE").Exists())
                 ModsUpdater.StartUpdate();
-        }
-
-        private static async UniTask LogTestHash()
-        {
-            Debug.Log(await HashUtility.GetSHA256(
-                "https://github.com/VerdiX094/sfs-electricity/releases/download/v1.0.1/Electricity_v1.0.1.pack"));
         }
 
         private void PatchAll()
